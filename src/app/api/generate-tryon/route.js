@@ -83,17 +83,30 @@ export async function POST(request) {
       color: { dark: '#7C3AED', light: '#FFFFFF' }
     });
 
-    // ✅ Database save - menggunakan query() dari db.js
+    // ✅ FIXED: Insert sesuai struktur table (tanpa BMI atau dengan BMI)
     let dbSaved = false;
     try {
-      const subjectResult = await query(
-        `INSERT INTO subject_details 
-         (session_id, tinggi_cm, berat_kg, body_type, age_range, photo_url, bmi) 
-         VALUES (?, ?, ?, ?, ?, ?, ?)`,
-        [sessionId, parseInt(tinggi), parseInt(berat), bodyType, ageRange, fullSubjectUrl, parseFloat(bmi)]
-      );
-
-      const subjectDetailId = subjectResult.insertId;
+      // Try dengan BMI first (jika kolom sudah ditambah)
+      let subjectDetailId;
+      try {
+        const result = await query(
+          `INSERT INTO subject_details 
+           (session_id, tinggi_cm, berat_kg, bmi, body_type, age_range, photo_url) 
+           VALUES (?, ?, ?, ?, ?, ?, ?)`,
+          [sessionId, parseInt(tinggi), parseInt(berat), parseFloat(bmi), bodyType, ageRange, fullSubjectUrl]
+        );
+        subjectDetailId = result.insertId;
+      } catch (bmiError) {
+        // Fallback: tanpa BMI
+        console.log('BMI column not found, using fallback');
+        const result = await query(
+          `INSERT INTO subject_details 
+           (session_id, tinggi_cm, berat_kg, body_type, age_range, photo_url) 
+           VALUES (?, ?, ?, ?, ?, ?)`,
+          [sessionId, parseInt(tinggi), parseInt(berat), bodyType, ageRange, fullSubjectUrl]
+        );
+        subjectDetailId = result.insertId;
+      }
 
       await query(
         `INSERT INTO try_on_history 
@@ -106,7 +119,8 @@ export async function POST(request) {
           JSON.stringify({
             ai_model: n8nResult.ai_model || 'unknown',
             n8n_workflow_id: n8nResult.workflow_id || null,
-            prompt: n8nResult.prompt || null
+            prompt: n8nResult.prompt || null,
+            bmi: parseFloat(bmi)
           })
         ]
       );
