@@ -29,7 +29,7 @@ export async function POST(request) {
     const tinggiM = tinggi / 100;
     const bmi = (berat / (tinggiM * tinggiM)).toFixed(1);
 
-    // Upload images to temporary storage
+    // Save uploaded images to temp folder
     const subjectUrl = await uploadTempImage(subjectPhoto, `${sessionId}_subject`);
     const garmentUrl = await uploadTempImage(garmentPhoto, `${sessionId}_garment`);
 
@@ -38,12 +38,10 @@ export async function POST(request) {
 
     console.log('Sending to n8n webhook:', { sessionId });
 
-    // ✅ Send to n8n webhook instead of direct AI API
+    // Call n8n webhook
     const n8nResponse = await fetch(process.env.NEXT_PUBLIC_N8N_WEBHOOK_URL, {
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
+      headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         mode: 'generate',
         session_id: sessionId,
@@ -67,29 +65,35 @@ export async function POST(request) {
 
     if (!n8nResponse.ok) {
       const errorText = await n8nResponse.text();
-      console.error('n8n webhook error:', errorText);
-      throw new Error(`n8n webhook failed: ${n8nResponse.status}`);
+      throw new Error(`n8n webhook failed: ${n8nResponse.status} - ${errorText}`);
     }
 
     const n8nResult = await n8nResponse.json();
-    console.log('n8n response:', n8nResult);
+    console.log('n8n response received:', {
+      success: n8nResult.success,
+      ai_model: n8nResult.ai_model,
+      generation_time: n8nResult.generation_time_seconds
+    });
 
     if (!n8nResult.success) {
       throw new Error(n8nResult.error || 'n8n generation failed');
     }
 
     const generationTime = ((Date.now() - startTime) / 1000).toFixed(2);
-    console.log('Generation complete:', { generationTime });
 
-    // Download result from n8n (if n8n returns URL)
-    const resultImageUrl = n8nResult.result_image_url;
-    const localResultUrl = await downloadAndSave(resultImageUrl, sessionId);
+    // ✅ FIX: Handle both base64 data URL and HTTP URL
+    const localResultUrl = await saveResultImage(n8nResult.result_image_url, sessionId);
+    const fullResultUrl = `${process.env.NEXT_PUBLIC_SITE_URL}${localResultUrl}`;
 
     // Generate QR code
-    const qrCode = await QRCode.toDataURL(
-      `${process.env.NEXT_PUBLIC_SITE_URL}${localResultUrl}`,
-      { width: 300, margin: 2 }
-    );
+    const qrCode = await QRCode.toDataURL(fullResultUrl, {
+      width: 300,
+      margin: 2,
+      color: {
+        dark: '#7C3AED',
+        light: '#FFFFFF'
+      }
+    });
 
     // Save to database
     const subjectDetailId = await saveSubjectDetails(db, {
@@ -106,7 +110,7 @@ export async function POST(request) {
       sessionId,
       fotoSubjekUrl: fullSubjectUrl,
       fotoPakaianUrl: fullGarmentUrl,
-      fotoHasil: `${process.env.NEXT_PUBLIC_SITE_URL}${localResultUrl}`,
+      fotoHasil: fullResultUrl,
       qrCode,
       kategoriPakaian: category.value,
       cropArea: category.crop,
@@ -114,7 +118,8 @@ export async function POST(request) {
       generationTime: parseFloat(generationTime),
       metadata: JSON.stringify({
         ai_model: n8nResult.ai_model || 'unknown',
-        n8n_workflow_id: n8nResult.workflow_id || null
+        n8n_workflow_id: n8nResult.workflow_id || null,
+        prompt: n8nResult.prompt || null
       })
     });
 
@@ -126,45 +131,55 @@ export async function POST(request) {
       generationTime: `${generationTime}s`,
       metadata: {
         ai_model: n8nResult.ai_model,
-        prompt_used: n8nResult.prompt
+        prompt: n8nResult.prompt
       }
     });
 
   } catch (error) {
     console.error('Generate try-on error:', error);
     return NextResponse.json(
-      { 
-        error: error.message,
-        details: error.response?.data || error.body || 'Unknown error'
+      {
+        error: error.message || 'Internal server error',
+        details: error.stack || 'Unknown error'
       },
       { status: 500 }
     );
   }
 }
 
+// ✅ FIX: Handle BOTH base64 data URL AND HTTP URL
+async function saveResultImage(imageUrlOrBase64, sessionId) {
+  const uploadsDir = path.join(process.cwd(), 'public', 'uploads', 'results');
+  await mkdir(uploadsDir, { recursive: true });
+
+  const filename = `${sessionId}_result.jpg`;
+  const filepath = path.join(uploadsDir, filename);
+
+  if (imageUrlOrBase64.startsWith('data:image')) {
+    // ✅ n8n returned base64 data URL
+    const base64Data = imageUrlOrBase64.replace(/^data:image\/\w+;base64,/, '');
+    const buffer = Buffer.from(base64Data, 'base64');
+    await writeFile(filepath, buffer);
+  } else {
+    // ✅ n8n returned HTTP URL (fal.ai, Replicate, etc.)
+    const response = await fetch(imageUrlOrBase64);
+    if (!response.ok) throw new Error(`Failed to download result image: ${response.status}`);
+    const buffer = Buffer.from(await response.arrayBuffer());
+    await writeFile(filepath, buffer);
+  }
+
+  return `/uploads/results/${filename}`;
+}
+
 async function uploadTempImage(base64Image, filename) {
   const buffer = Buffer.from(base64Image.replace(/^data:image\/\w+;base64,/, ''), 'base64');
   const uploadsDir = path.join(process.cwd(), 'public', 'uploads', 'temp');
   await mkdir(uploadsDir, { recursive: true });
-  
+
   const filepath = path.join(uploadsDir, `${filename}.jpg`);
   await writeFile(filepath, buffer);
-  
-  return `/uploads/temp/${filename}.jpg`;
-}
 
-async function downloadAndSave(url, sessionId) {
-  const response = await fetch(url);
-  const buffer = await response.arrayBuffer();
-  
-  const uploadsDir = path.join(process.cwd(), 'public', 'uploads', 'results');
-  await mkdir(uploadsDir, { recursive: true });
-  
-  const filename = `${sessionId}_result.jpg`;
-  const filepath = path.join(uploadsDir, filename);
-  await writeFile(filepath, Buffer.from(buffer));
-  
-  return `/uploads/results/${filename}`;
+  return `/uploads/temp/${filename}.jpg`;
 }
 
 async function saveSubjectDetails(db, data) {
@@ -174,14 +189,14 @@ async function saveSubjectDetails(db, data) {
      VALUES (?, ?, ?, ?, ?, ?, ?)`,
     [data.sessionId, data.tinggi, data.berat, data.bodyType, data.ageRange, data.photoUrl, data.bmi]
   );
-  
   return result.insertId;
 }
 
 async function saveTryOnHistory(db, data) {
   await db.execute(
     `INSERT INTO try_on_history 
-     (session_id, foto_subjek_url, foto_pakaian_url, foto_hasil, qr_code, kategori_pakaian, crop_area, subject_detail_id, generation_time_seconds, metadata) 
+     (session_id, foto_subjek_url, foto_pakaian_url, foto_hasil, qr_code, 
+      kategori_pakaian, crop_area, subject_detail_id, generation_time_seconds, metadata) 
      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     [
       data.sessionId,
