@@ -1,19 +1,28 @@
 import { NextResponse } from 'next/server';
 import db from '@/lib/db';
+import * as fal from '@fal-ai/serverless-client';
+import QRCode from 'qrcode';
+import { writeFile, mkdir } from 'fs/promises';
+import path from 'path';
+
+// Configure fal.ai
+fal.config({
+  credentials: process.env.FAL_API_KEY,
+});
 
 export async function POST(request) {
   try {
     const {
-      subjectPhoto,
+      subjectPhoto,    // Base64 image
       tinggi,
       berat,
       bodyType,
       ageRange,
-      garmentPhoto,
+      garmentPhoto,    // Base64 image
       category
     } = await request.json();
 
-    // Validate input
+    // Validate
     if (!subjectPhoto || !garmentPhoto || !category) {
       return NextResponse.json(
         { error: 'Missing required fields' },
@@ -21,191 +30,163 @@ export async function POST(request) {
       );
     }
 
-    // Generate session ID
     const sessionId = `tryon_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+    const startTime = Date.now();
 
-    // Calculate BMI for better AI prompt
+    // Calculate BMI
     const tinggiM = tinggi / 100;
-    const bmi = berat / (tinggiM * tinggiM);
+    const bmi = (berat / (tinggiM * tinggiM)).toFixed(1);
 
-    // Build prompt based on category
+    // Build prompt
     const prompt = buildPrompt(category, bodyType, bmi, tinggi);
 
-    console.log('Starting virtual try-on generation...', {
-      sessionId,
-      category: category.value,
-      bodyType,
-      tinggi,
-      berat
+    console.log('Starting generation:', { sessionId, prompt });
+
+    // Upload images to temporary storage (fal.ai needs URLs, not base64)
+    const subjectUrl = await uploadTempImage(subjectPhoto, `${sessionId}_subject`);
+    const garmentUrl = await uploadTempImage(garmentPhoto, `${sessionId}_garment`);
+
+    // Call fal.ai Virtual Try-On
+    const result = await fal.subscribe('fal-ai/idm-vton', {
+      input: {
+        human_img: subjectUrl,
+        garm_img: garmentUrl,
+        garment_des: prompt,
+      },
+      logs: true,
+      onQueueUpdate: (update) => {
+        console.log('Queue update:', update);
+      },
     });
 
-    // Call try-on API (placeholder - implement based on your chosen API)
-    const tryonResult = await callTryOnAPI({
-      subjectPhoto,
-      garmentPhoto,
-      prompt,
-      cropArea: category.crop
-    });
+    const generationTime = ((Date.now() - startTime) / 1000).toFixed(2);
+    console.log('Generation complete:', { generationTime, result });
 
-    // Upload result to R2 Cloudflare (or save to public folder temporarily)
-    const imageUrl = await uploadToStorage(tryonResult.image, sessionId);
+    // Save result image
+    const resultImageUrl = result.image.url;
+    const localResultUrl = await downloadAndSave(resultImageUrl, sessionId);
 
     // Generate QR code
-    const qrCode = await generateQR(imageUrl);
+    const qrCode = await QRCode.toDataURL(
+      `${process.env.NEXT_PUBLIC_SITE_URL}${localResultUrl}`,
+      { width: 300, margin: 2 }
+    );
 
     // Save to database
-    await saveToDatabase(db, {
+    const subjectDetailId = await saveSubjectDetails(db, {
       sessionId,
-      subjectDetails: { tinggi, berat, bodyType, ageRange },
-      category: category.value,
+      tinggi,
+      berat,
+      bodyType,
+      ageRange,
+      photoUrl: subjectUrl,
+      bmi
+    });
+
+    await saveTryOnHistory(db, {
+      sessionId,
+      fotoSubjekUrl: subjectUrl,
+      fotoPakaianUrl: garmentUrl,
+      fotoHasil: localResultUrl,
+      qrCode,
+      kategoriPakaian: category.value,
       cropArea: category.crop,
-      imageUrl,
-      qrCode
+      subjectDetailId,
+      generationTime
     });
 
     return NextResponse.json({
       success: true,
       sessionId,
-      imageUrl,
-      qrCode
+      imageUrl: localResultUrl,
+      qrCode,
+      generationTime: `${generationTime}s`
     });
 
   } catch (error) {
     console.error('Generate try-on error:', error);
     return NextResponse.json(
-      { error: error.message || 'Internal server error' },
+      { error: error.message || 'Failed to generate virtual try-on' },
       { status: 500 }
     );
   }
 }
 
-// Helper function: Build AI prompt
+// Helper: Build AI prompt
 function buildPrompt(category, bodyType, bmi, tinggi) {
   const bodyDesc = {
-    petite: 'petite body, small frame, delicate proportions',
-    slim: 'slim and slender body, lean figure',
-    average: 'average body proportions, balanced figure',
-    curvy: 'curvy body with defined waist, hourglass shape',
-    plus_size: 'plus size body, fuller figure, confident pose'
+    petite: 'petite body, small frame',
+    slim: 'slim and slender body',
+    average: 'average body proportions',
+    curvy: 'curvy body with defined waist',
+    plus_size: 'plus size body, fuller figure'
   };
 
   const cropDesc = {
-    half_body: 'upper body shot, from waist up, cropped at waist level, focus on top garment',
-    three_quarter: 'three-quarter body shot, from head to knees, showing tunic length garment',
-    full_body: 'full body shot, from head to feet, showing complete outfit from top to bottom'
+    half_body: 'upper body view',
+    three_quarter: 'three-quarter body view',
+    full_body: 'full body view'
   };
 
-  return `Professional fashion photography, Indonesian woman, ${bodyDesc[bodyType]}, height ${tinggi}cm, BMI ${bmi.toFixed(1)}, ${cropDesc[category.crop]}, studio lighting, neutral white background, high quality 4K, realistic skin texture, detailed fabric texture, professional model pose, front facing, natural expression`;
+  return `${cropDesc[category.crop]}, Indonesian woman, ${bodyDesc[bodyType]}, height ${tinggi}cm, BMI ${bmi}, professional fashion photography, studio lighting, white background`;
 }
 
-// Helper function: Call Try-On API
-async function callTryOnAPI(data) {
-  // TODO: Implement based on chosen API (fal.ai, Replicate, etc)
-  // For now, return mock data
+// Helper: Upload temp image (convert base64 to URL)
+async function uploadTempImage(base64Image, filename) {
+  const buffer = Buffer.from(base64Image.replace(/^data:image\/\w+;base64,/, ''), 'base64');
+  const uploadsDir = path.join(process.cwd(), 'public', 'uploads', 'temp');
   
-  console.log('Calling try-on API with:', {
-    prompt: data.prompt,
-    cropArea: data.cropArea
-  });
-
-  // Mock implementation - replace with real API call
-  // Example for fal.ai:
-  /*
-  const response = await fetch('https://fal.run/fal-ai/idm-vton', {
-    method: 'POST',
-    headers: {
-      'Authorization': `Key ${process.env.FAL_API_KEY}`,
-      'Content-Type': 'application/json'
-    },
-    body: JSON.stringify({
-      human_img: data.subjectPhoto,
-      garm_img: data.garmentPhoto,
-      garment_des: data.prompt
-    })
-  });
+  await mkdir(uploadsDir, { recursive: true });
   
-  return await response.json();
-  */
-
-  // Mock response for testing
-  return {
-    image: data.subjectPhoto, // Return subject photo as placeholder
-    status: 'success'
-  };
+  const filepath = path.join(uploadsDir, `${filename}.jpg`);
+  await writeFile(filepath, buffer);
+  
+  return `/uploads/temp/${filename}.jpg`;
 }
 
-// Helper function: Upload to storage (R2 or local)
-async function uploadToStorage(imageBase64, sessionId) {
-  // TODO: Implement R2 Cloudflare upload
-  // For now, save to public folder
+// Helper: Download and save result
+async function downloadAndSave(url, sessionId) {
+  const response = await fetch(url);
+  const buffer = await response.arrayBuffer();
   
-  const fs = require('fs');
-  const path = require('path');
+  const uploadsDir = path.join(process.cwd(), 'public', 'uploads', 'results');
+  await mkdir(uploadsDir, { recursive: true });
   
-  const uploadsDir = path.join(process.cwd(), 'public', 'uploads');
-  if (!fs.existsSync(uploadsDir)) {
-    fs.mkdirSync(uploadsDir, { recursive: true });
-  }
-
-  const filename = `${sessionId}.jpg`;
+  const filename = `${sessionId}_result.jpg`;
   const filepath = path.join(uploadsDir, filename);
+  await writeFile(filepath, Buffer.from(buffer));
   
-  // Convert base64 to buffer and save
-  const base64Data = imageBase64.replace(/^data:image\/\w+;base64,/, '');
-  const buffer = Buffer.from(base64Data, 'base64');
-  fs.writeFileSync(filepath, buffer);
-
-  return `/uploads/${filename}`;
+  return `/uploads/results/${filename}`;
 }
 
-// Helper function: Generate QR code
-async function generateQR(url) {
-  const QRCode = require('qrcode');
+// Helper: Save subject details to DB
+async function saveSubjectDetails(db, data) {
+  const [result] = await db.execute(
+    `INSERT INTO subject_details 
+     (session_id, tinggi_cm, berat_kg, body_type, age_range, photo_url, bmi) 
+     VALUES (?, ?, ?, ?, ?, ?, ?)`,
+    [data.sessionId, data.tinggi, data.berat, data.bodyType, data.ageRange, data.photoUrl, data.bmi]
+  );
   
-  const fullUrl = `${process.env.NEXT_PUBLIC_SITE_URL}${url}`;
-  const qrCodeDataUrl = await QRCode.toDataURL(fullUrl, {
-    width: 300,
-    margin: 2,
-    color: {
-      dark: '#7C3AED',
-      light: '#FFFFFF'
-    }
-  });
-
-  return qrCodeDataUrl;
+  return result.insertId;
 }
 
-// Helper function: Save to database
-async function saveToDatabase(db, data) {
-  const { sessionId, subjectDetails, category, cropArea, imageUrl, qrCode } = data;
-
-  try {
-    // Save subject details
-    await db.execute(
-      `INSERT INTO subject_details 
-       (session_id, tinggi_cm, berat_kg, body_type, age_range, photo_url) 
-       VALUES (?, ?, ?, ?, ?, ?)`,
-      [
-        sessionId,
-        subjectDetails.tinggi,
-        subjectDetails.berat,
-        subjectDetails.bodyType,
-        subjectDetails.ageRange,
-        imageUrl
-      ]
-    );
-
-    // Save try-on history
-    await db.execute(
-      `INSERT INTO try_on_history 
-       (session_id, foto_hasil, qr_code, kategori_pakaian, crop_area) 
-       VALUES (?, ?, ?, ?, ?)`,
-      [sessionId, imageUrl, qrCode, category, cropArea]
-    );
-
-    console.log('Saved to database:', sessionId);
-  } catch (error) {
-    console.error('Database save error:', error);
-    throw error;
-  }
+// Helper: Save try-on history
+async function saveTryOnHistory(db, data) {
+  await db.execute(
+    `INSERT INTO try_on_history 
+     (session_id, foto_subjek_url, foto_pakaian_url, foto_hasil, qr_code, kategori_pakaian, crop_area, subject_detail_id, generation_time_seconds) 
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    [
+      data.sessionId,
+      data.fotoSubjekUrl,
+      data.fotoPakaianUrl,
+      data.fotoHasil,
+      data.qrCode,
+      data.kategoriPakaian,
+      data.cropArea,
+      data.subjectDetailId,
+      data.generationTime
+    ]
+  );
 }

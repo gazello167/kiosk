@@ -9,6 +9,7 @@
     "lint": "next lint"
   },
   "dependencies": {
+    "@fal-ai/serverless-client": "^0.15.0",
     "autoprefixer": "^10.4.0",
     "clsx": "^2.1.0",
     "framer-motion": "^11.18.2",
