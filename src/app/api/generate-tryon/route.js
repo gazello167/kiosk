@@ -1,28 +1,21 @@
 import { NextResponse } from 'next/server';
 import db from '@/lib/db';
-import * as fal from '@fal-ai/serverless-client';
 import QRCode from 'qrcode';
 import { writeFile, mkdir } from 'fs/promises';
 import path from 'path';
 
-// Configure fal.ai
-fal.config({
-  credentials: process.env.FAL_API_KEY,
-});
-
 export async function POST(request) {
   try {
     const {
-      subjectPhoto,    // Base64 image
+      subjectPhoto,
       tinggi,
       berat,
       bodyType,
       ageRange,
-      garmentPhoto,    // Base64 image
+      garmentPhoto,
       category
     } = await request.json();
 
-    // Validate
     if (!subjectPhoto || !garmentPhoto || !category) {
       return NextResponse.json(
         { error: 'Missing required fields' },
@@ -33,37 +26,63 @@ export async function POST(request) {
     const sessionId = `tryon_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
     const startTime = Date.now();
 
-    // Calculate BMI
     const tinggiM = tinggi / 100;
     const bmi = (berat / (tinggiM * tinggiM)).toFixed(1);
 
-    // Build prompt
-    const prompt = buildPrompt(category, bodyType, bmi, tinggi);
-
-    console.log('Starting generation:', { sessionId, prompt });
-
-    // Upload images to temporary storage (fal.ai needs URLs, not base64)
+    // Upload images to temporary storage
     const subjectUrl = await uploadTempImage(subjectPhoto, `${sessionId}_subject`);
     const garmentUrl = await uploadTempImage(garmentPhoto, `${sessionId}_garment`);
 
-    // Call fal.ai Virtual Try-On
-    const result = await fal.subscribe('fal-ai/idm-vton', {
-      input: {
-        human_img: subjectUrl,
-        garm_img: garmentUrl,
-        garment_des: prompt,
+    const fullSubjectUrl = `${process.env.NEXT_PUBLIC_SITE_URL}${subjectUrl}`;
+    const fullGarmentUrl = `${process.env.NEXT_PUBLIC_SITE_URL}${garmentUrl}`;
+
+    console.log('Sending to n8n webhook:', { sessionId });
+
+    // ✅ Send to n8n webhook instead of direct AI API
+    const n8nResponse = await fetch(process.env.NEXT_PUBLIC_N8N_WEBHOOK_URL, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
       },
-      logs: true,
-      onQueueUpdate: (update) => {
-        console.log('Queue update:', update);
-      },
+      body: JSON.stringify({
+        mode: 'generate',
+        session_id: sessionId,
+        subject_photo_url: fullSubjectUrl,
+        garment_photo_url: fullGarmentUrl,
+        subject_details: {
+          tinggi: parseInt(tinggi),
+          berat: parseInt(berat),
+          bmi: parseFloat(bmi),
+          body_type: bodyType,
+          age_range: ageRange
+        },
+        garment_category: {
+          value: category.value,
+          label: category.label,
+          crop_area: category.crop,
+          crop_height_percentage: category.cropHeightPercentage || 50
+        }
+      }),
     });
 
-    const generationTime = ((Date.now() - startTime) / 1000).toFixed(2);
-    console.log('Generation complete:', { generationTime, result });
+    if (!n8nResponse.ok) {
+      const errorText = await n8nResponse.text();
+      console.error('n8n webhook error:', errorText);
+      throw new Error(`n8n webhook failed: ${n8nResponse.status}`);
+    }
 
-    // Save result image
-    const resultImageUrl = result.image.url;
+    const n8nResult = await n8nResponse.json();
+    console.log('n8n response:', n8nResult);
+
+    if (!n8nResult.success) {
+      throw new Error(n8nResult.error || 'n8n generation failed');
+    }
+
+    const generationTime = ((Date.now() - startTime) / 1000).toFixed(2);
+    console.log('Generation complete:', { generationTime });
+
+    // Download result from n8n (if n8n returns URL)
+    const resultImageUrl = n8nResult.result_image_url;
     const localResultUrl = await downloadAndSave(resultImageUrl, sessionId);
 
     // Generate QR code
@@ -75,24 +94,28 @@ export async function POST(request) {
     // Save to database
     const subjectDetailId = await saveSubjectDetails(db, {
       sessionId,
-      tinggi,
-      berat,
+      tinggi: parseInt(tinggi),
+      berat: parseInt(berat),
       bodyType,
       ageRange,
-      photoUrl: subjectUrl,
-      bmi
+      photoUrl: fullSubjectUrl,
+      bmi: parseFloat(bmi)
     });
 
     await saveTryOnHistory(db, {
       sessionId,
-      fotoSubjekUrl: subjectUrl,
-      fotoPakaianUrl: garmentUrl,
-      fotoHasil: localResultUrl,
+      fotoSubjekUrl: fullSubjectUrl,
+      fotoPakaianUrl: fullGarmentUrl,
+      fotoHasil: `${process.env.NEXT_PUBLIC_SITE_URL}${localResultUrl}`,
       qrCode,
       kategoriPakaian: category.value,
       cropArea: category.crop,
       subjectDetailId,
-      generationTime
+      generationTime: parseFloat(generationTime),
+      metadata: JSON.stringify({
+        ai_model: n8nResult.ai_model || 'unknown',
+        n8n_workflow_id: n8nResult.workflow_id || null
+      })
     });
 
     return NextResponse.json({
@@ -100,42 +123,28 @@ export async function POST(request) {
       sessionId,
       imageUrl: localResultUrl,
       qrCode,
-      generationTime: `${generationTime}s`
+      generationTime: `${generationTime}s`,
+      metadata: {
+        ai_model: n8nResult.ai_model,
+        prompt_used: n8nResult.prompt
+      }
     });
 
   } catch (error) {
     console.error('Generate try-on error:', error);
     return NextResponse.json(
-      { error: error.message || 'Failed to generate virtual try-on' },
+      { 
+        error: error.message,
+        details: error.response?.data || error.body || 'Unknown error'
+      },
       { status: 500 }
     );
   }
 }
 
-// Helper: Build AI prompt
-function buildPrompt(category, bodyType, bmi, tinggi) {
-  const bodyDesc = {
-    petite: 'petite body, small frame',
-    slim: 'slim and slender body',
-    average: 'average body proportions',
-    curvy: 'curvy body with defined waist',
-    plus_size: 'plus size body, fuller figure'
-  };
-
-  const cropDesc = {
-    half_body: 'upper body view',
-    three_quarter: 'three-quarter body view',
-    full_body: 'full body view'
-  };
-
-  return `${cropDesc[category.crop]}, Indonesian woman, ${bodyDesc[bodyType]}, height ${tinggi}cm, BMI ${bmi}, professional fashion photography, studio lighting, white background`;
-}
-
-// Helper: Upload temp image (convert base64 to URL)
 async function uploadTempImage(base64Image, filename) {
   const buffer = Buffer.from(base64Image.replace(/^data:image\/\w+;base64,/, ''), 'base64');
   const uploadsDir = path.join(process.cwd(), 'public', 'uploads', 'temp');
-  
   await mkdir(uploadsDir, { recursive: true });
   
   const filepath = path.join(uploadsDir, `${filename}.jpg`);
@@ -144,7 +153,6 @@ async function uploadTempImage(base64Image, filename) {
   return `/uploads/temp/${filename}.jpg`;
 }
 
-// Helper: Download and save result
 async function downloadAndSave(url, sessionId) {
   const response = await fetch(url);
   const buffer = await response.arrayBuffer();
@@ -159,7 +167,6 @@ async function downloadAndSave(url, sessionId) {
   return `/uploads/results/${filename}`;
 }
 
-// Helper: Save subject details to DB
 async function saveSubjectDetails(db, data) {
   const [result] = await db.execute(
     `INSERT INTO subject_details 
@@ -171,12 +178,11 @@ async function saveSubjectDetails(db, data) {
   return result.insertId;
 }
 
-// Helper: Save try-on history
 async function saveTryOnHistory(db, data) {
   await db.execute(
     `INSERT INTO try_on_history 
-     (session_id, foto_subjek_url, foto_pakaian_url, foto_hasil, qr_code, kategori_pakaian, crop_area, subject_detail_id, generation_time_seconds) 
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+     (session_id, foto_subjek_url, foto_pakaian_url, foto_hasil, qr_code, kategori_pakaian, crop_area, subject_detail_id, generation_time_seconds, metadata) 
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     [
       data.sessionId,
       data.fotoSubjekUrl,
@@ -186,7 +192,8 @@ async function saveTryOnHistory(db, data) {
       data.kategoriPakaian,
       data.cropArea,
       data.subjectDetailId,
-      data.generationTime
+      data.generationTime,
+      data.metadata
     ]
   );
 }

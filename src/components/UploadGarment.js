@@ -12,6 +12,7 @@ export default function UploadGarment({ onGenerate, onBack }) {
       value: 'atasan',
       label: 'Atasan / Jaket / Sweater',
       crop: 'half_body',
+      cropHeightPercentage: 50,
       icon: '👚',
       desc: 'Hanya setengah badan (dada ke atas)'
     },
@@ -19,6 +20,7 @@ export default function UploadGarment({ onGenerate, onBack }) {
       value: 'tunik',
       label: 'Tunik',
       crop: 'three_quarter',
+      cropHeightPercentage: 75,
       icon: '👗',
       desc: 'Lebih panjang (lutut ke atas)'
     },
@@ -26,6 +28,7 @@ export default function UploadGarment({ onGenerate, onBack }) {
       value: 'dress',
       label: 'Dress / Gamis',
       crop: 'full_body',
+      cropHeightPercentage: 100,
       icon: '👘',
       desc: 'Seluruh badan (hingga kaki)'
     },
@@ -33,6 +36,7 @@ export default function UploadGarment({ onGenerate, onBack }) {
       value: 'setelan',
       label: 'Setelan',
       crop: 'full_body',
+      cropHeightPercentage: 100,
       icon: '👔',
       desc: 'Atasan + Celana/Rok'
     }
