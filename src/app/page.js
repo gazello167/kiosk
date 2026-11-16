@@ -8,7 +8,7 @@ import GeneratingResult from '@/components/GeneratingResult';
 import ResultDisplay from '@/components/ResultDisplay';
 
 export default function Home() {
-  const [step, setStep] = useState('upload-subject'); // upload-subject, subject-details, upload-garment, generating, result
+  const [step, setStep] = useState('upload-subject');
   const [sessionData, setSessionData] = useState({});
 
   const handleSubjectUploaded = (data) => {
@@ -26,7 +26,6 @@ export default function Home() {
     setStep('generating');
 
     try {
-      // Call API to generate
       const response = await fetch('/api/generate-tryon', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -41,12 +40,23 @@ export default function Home() {
         })
       });
 
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status}: ${await response.text()}`);
+      }
+
       const result = await response.json();
-      setSessionData({...sessionData, result});
+
+      // ✅ Validate response
+      if (!result.success) {
+        throw new Error(result.error || 'Generation failed');
+      }
+
+      setSessionData({...sessionData, ...data, result});
       setStep('result');
     } catch (error) {
       console.error('Generate error:', error);
-      // Handle error
+      alert('Error: ' + error.message);
+      setStep('upload-garment'); // Back to previous step
     }
   };
 
@@ -80,12 +90,12 @@ export default function Home() {
         <GeneratingResult />
       )}
 
-      {step === 'result' && (
-        <ResultDisplay 
-          result={sessionData.result}
-          onTryAgain={handleReset}
-        />
-      )}
+     {step === 'result' && sessionData.result && (
+       <ResultDisplay 
+       resultData={sessionData.result}
+       onRestart={handleReset}
+      />
+     )}
     </main>
   );
 }
