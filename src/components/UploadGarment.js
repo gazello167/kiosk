@@ -1,11 +1,15 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useRef } from 'react';
 import { motion } from 'framer-motion';
+import Webcam from 'react-webcam';
 
 export default function UploadGarment({ onGenerate, onBack }) {
+  const [mode, setMode] = useState('upload'); // 'upload' or 'camera'
   const [garmentPhoto, setGarmentPhoto] = useState(null);
   const [category, setCategory] = useState('');
+  const webcamRef = useRef(null);
+  const [isCameraReady, setIsCameraReady] = useState(false);
 
   const categories = [
     {
@@ -51,6 +55,18 @@ export default function UploadGarment({ onGenerate, onBack }) {
     }
   };
 
+  const handleCapture = () => {
+    const imageSrc = webcamRef.current?.getScreenshot();
+    if (imageSrc) {
+      setGarmentPhoto(imageSrc);
+      setMode('upload'); // Switch back to preview mode
+    }
+  };
+
+  const handleRetake = () => {
+    setGarmentPhoto(null);
+  };
+
   const handleGenerate = () => {
     if (garmentPhoto && category) {
       const selectedCat = categories.find(c => c.value === category);
@@ -59,6 +75,12 @@ export default function UploadGarment({ onGenerate, onBack }) {
         category: selectedCat
       });
     }
+  };
+
+  const videoConstraints = {
+    width: 1080,
+    height: 1920,
+    facingMode: 'environment', // Back camera untuk foto pakaian
   };
 
   return (
@@ -73,35 +95,114 @@ export default function UploadGarment({ onGenerate, onBack }) {
         </h2>
 
         <div className="grid grid-cols-1 md:grid-cols-2 gap-5 sm:gap-8 mb-6 sm:mb-8">
-          {/* Upload area */}
+          {/* Upload/Camera area */}
           <div>
-            <label 
-              htmlFor="garment-upload"
-              className="block w-full h-56 sm:h-96 border-4 border-dashed border-purple-300 rounded-2xl cursor-pointer hover:border-purple-500 transition-all relative overflow-hidden group"
-            >
-              {garmentPhoto ? (
-                <img 
-                  src={garmentPhoto} 
-                  alt="Garment" 
-                  className="w-full h-full object-contain bg-gray-50"
+            {/* Mode Toggle */}
+            <div className="flex gap-2 mb-3 bg-purple-100 p-1.5 rounded-xl">
+              <button
+                onClick={() => setMode('upload')}
+                className={`flex-1 py-2 rounded-lg font-semibold transition-all text-xs sm:text-sm ${
+                  mode === 'upload'
+                    ? 'bg-white text-purple-800 shadow-md'
+                    : 'text-purple-600 hover:text-purple-800'
+                }`}
+              >
+                📤 Upload
+              </button>
+              <button
+                onClick={() => {
+                  setMode('camera');
+                  setGarmentPhoto(null);
+                }}
+                className={`flex-1 py-2 rounded-lg font-semibold transition-all text-xs sm:text-sm ${
+                  mode === 'camera'
+                    ? 'bg-white text-purple-800 shadow-md'
+                    : 'text-purple-600 hover:text-purple-800'
+                }`}
+              >
+                📷 Kamera
+              </button>
+            </div>
+
+            {/* Upload Mode */}
+            {mode === 'upload' && (
+              <label 
+                htmlFor="garment-upload"
+                className="block w-full h-56 sm:h-96 border-4 border-dashed border-purple-300 rounded-2xl cursor-pointer hover:border-purple-500 transition-all relative overflow-hidden group"
+              >
+                {garmentPhoto ? (
+                  <div className="relative w-full h-full">
+                    <img 
+                      src={garmentPhoto} 
+                      alt="Garment" 
+                      className="w-full h-full object-contain bg-gray-50"
+                    />
+                    <button
+                      onClick={(e) => {
+                        e.preventDefault();
+                        handleRetake();
+                      }}
+                      className="absolute top-3 right-3 bg-red-500 text-white px-3 py-1.5 rounded-lg text-xs sm:text-sm font-semibold hover:bg-red-600 transition"
+                    >
+                      🔄 Ganti
+                    </button>
+                  </div>
+                ) : (
+                  <div className="flex flex-col items-center justify-center h-full text-purple-400 group-hover:text-purple-600 px-4">
+                    <svg className="w-14 h-14 sm:w-20 sm:h-20 mb-3 sm:mb-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" />
+                    </svg>
+                    <p className="text-base sm:text-xl font-semibold text-center">Upload Foto Pakaian</p>
+                    <p className="text-xs sm:text-sm mt-2 text-center">Background putih/polos</p>
+                  </div>
+                )}
+                <input
+                  id="garment-upload"
+                  type="file"
+                  accept="image/*"
+                  onChange={handleFileChange}
+                  className="hidden"
                 />
-              ) : (
-                <div className="flex flex-col items-center justify-center h-full text-purple-400 group-hover:text-purple-600 px-4">
-                  <svg className="w-14 h-14 sm:w-20 sm:h-20 mb-3 sm:mb-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" />
-                  </svg>
-                  <p className="text-base sm:text-xl font-semibold text-center">Upload Foto Pakaian</p>
-                  <p className="text-xs sm:text-sm mt-2 text-center">Background putih/polos</p>
+              </label>
+            )}
+
+            {/* Camera Mode */}
+            {mode === 'camera' && !garmentPhoto && (
+              <div className="relative w-full h-56 sm:h-96 bg-black rounded-2xl overflow-hidden">
+                <Webcam
+                  ref={webcamRef}
+                  audio={false}
+                  screenshotFormat="image/jpeg"
+                  videoConstraints={videoConstraints}
+                  className="w-full h-full object-cover"
+                  onUserMedia={() => setIsCameraReady(true)}
+                  onUserMediaError={() => alert('Tidak dapat mengakses kamera')}
+                />
+                
+                {/* Camera guide overlay */}
+                <div className="absolute inset-0 pointer-events-none">
+                  <div className="absolute inset-4 border-2 border-white/50 rounded-xl" />
                 </div>
-              )}
-              <input
-                id="garment-upload"
-                type="file"
-                accept="image/*"
-                onChange={handleFileChange}
-                className="hidden"
-              />
-            </label>
+
+                {/* Instructions */}
+                <div className="absolute top-3 left-0 right-0 text-center">
+                  <div className="bg-black/60 backdrop-blur-sm text-white px-4 py-2 rounded-full inline-block text-xs sm:text-sm">
+                    Letakkan pakaian di tengah frame
+                  </div>
+                </div>
+
+                {/* Capture button */}
+                <div className="absolute bottom-4 left-0 right-0 flex justify-center">
+                  <button
+                    onClick={handleCapture}
+                    disabled={!isCameraReady}
+                    className="bg-white w-14 h-14 sm:w-16 sm:h-16 rounded-full flex items-center justify-center shadow-2xl disabled:opacity-50 active:scale-95 transition-transform"
+                  >
+                    <div className="w-10 h-10 sm:w-12 sm:h-12 rounded-full border-4 border-purple-600" />
+                  </button>
+                </div>
+              </div>
+            )}
           </div>
 
           {/* Category selection */}
