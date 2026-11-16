@@ -8,12 +8,22 @@ export async function POST(request) {
   try {
     const body = await request.json();
 
+    // Generate QR code yang valid
+    const qrCode = await QRCode.toDataURL('https://kiosk.allamoda.id', {
+      width: 300,
+      margin: 2,
+      color: {
+        dark: '#7C3AED',
+        light: '#FFFFFF'
+      }
+    });
+
     // ✅ MOCK MODE - return fake data untuk testing frontend
     const mockResult = {
       success: true,
       sessionId: `mock_${Date.now()}`,
-      imageUrl: 'https://picsum.photos/400/600',  // Gambar test
-      qrCode: 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==',
+      imageUrl: 'https://picsum.photos/400/600',
+      qrCode: qrCode,  // ← QR yang valid
       generationTime: '2.5s',
       dbSaved: false,
       metadata: {
