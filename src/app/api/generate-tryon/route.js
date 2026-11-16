@@ -6,6 +6,36 @@ import path from 'path';
 
 export async function POST(request) {
   try {
+    const body = await request.json();
+
+    // ✅ MOCK MODE - return fake data untuk testing frontend
+    const mockResult = {
+      success: true,
+      sessionId: `mock_${Date.now()}`,
+      imageUrl: 'https://picsum.photos/400/600',  // Gambar test
+      qrCode: 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==',
+      generationTime: '2.5s',
+      dbSaved: false,
+      metadata: {
+        ai_model: 'mock-mode',
+        prompt: 'Mock prompt for testing'
+      }
+    };
+
+    console.log('MOCK MODE - returning fake result:', mockResult.sessionId);
+    return NextResponse.json(mockResult);
+
+  } catch (error) {
+    console.error('Error:', error);
+    return NextResponse.json(
+      { error: error.message },
+      { status: 500 }
+    );
+  }
+}
+/*
+export async function POST(request) {
+  try {
     const {
       subjectPhoto,
       tinggi,
@@ -151,7 +181,7 @@ export async function POST(request) {
     );
   }
 }
-
+*/
 async function saveResultImage(imageUrlOrBase64, sessionId) {
   const uploadsDir = path.join(process.cwd(), 'public', 'uploads', 'results');
   await mkdir(uploadsDir, { recursive: true });
