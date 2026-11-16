@@ -1,17 +1,33 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 
 export default function ResultDisplay({ resultData, onRestart }) {
-  const [countdown, setCountdown] = useState(60);
+  const IDLE_TIMEOUT = 60; // detik sebelum auto-restart
+  const [countdown, setCountdown] = useState(IDLE_TIMEOUT);
+  const [showWarning, setShowWarning] = useState(false);
+
+  // Reset timer ke awal setiap ada interaksi user
+  const resetTimer = useCallback(() => {
+    setCountdown(IDLE_TIMEOUT);
+    setShowWarning(false);
+  }, [IDLE_TIMEOUT]);
 
   useEffect(() => {
-    console.log('ResultDisplay mounted:', resultData);
-  }, [resultData]);
+    // Event yang dianggap "aktivitas user"
+    const events = ['touchstart', 'touchmove', 'mousedown', 'mousemove', 'scroll', 'keydown'];
+    
+    events.forEach(event => {
+      window.addEventListener(event, resetTimer, { passive: true });
+    });
 
-  useEffect(() => {
     const timer = setInterval(() => {
       setCountdown((prev) => {
+        // Tampilkan warning 10 detik terakhir
+        if (prev <= 10 && prev > 0) {
+          setShowWarning(true);
+        }
+
         if (prev <= 1) {
           onRestart();
           return 0;
@@ -19,16 +35,23 @@ export default function ResultDisplay({ resultData, onRestart }) {
         return prev - 1;
       });
     }, 1000);
-    return () => clearInterval(timer);
-  }, [onRestart]);
 
+    return () => {
+      clearInterval(timer);
+      events.forEach(event => {
+        window.removeEventListener(event, resetTimer);
+      });
+    };
+  }, [onRestart, resetTimer]);
+
+  // =====================
+  // Guard: no result data
+  // =====================
   if (!resultData) {
     return (
       <div className="min-h-screen min-h-dvh flex items-center justify-center bg-gradient-to-br from-purple-500 to-pink-500 p-4">
         <div className="bg-white rounded-3xl p-8 text-center shadow-2xl">
-          <h2 className="text-xl font-bold text-red-600 mb-4">
-            Data tidak ditemukan
-          </h2>
+          <h2 className="text-xl font-bold text-red-600 mb-4">Data tidak ditemukan</h2>
           <button
             onClick={onRestart}
             className="bg-purple-600 text-white px-6 py-3 rounded-full font-bold"
@@ -43,7 +66,7 @@ export default function ResultDisplay({ resultData, onRestart }) {
   return (
     <div className="min-h-screen min-h-dvh bg-gradient-to-br from-purple-500 to-pink-500 py-6 px-4 overflow-y-auto">
       <div className="max-w-md mx-auto pb-8">
-        
+
         {/* Header */}
         <div className="text-center mb-6">
           <h1 className="text-2xl md:text-3xl font-bold text-white mb-2">
@@ -61,7 +84,6 @@ export default function ResultDisplay({ resultData, onRestart }) {
             alt="Virtual Try-On Result"
             className="w-full rounded-2xl object-cover"
             onError={(e) => {
-              console.error('Image load failed');
               e.target.src = 'https://picsum.photos/400/600';
             }}
           />
@@ -81,7 +103,7 @@ export default function ResultDisplay({ resultData, onRestart }) {
               />
             </div>
             <p className="text-gray-500 text-sm mt-3">
-              Scan dengan HP untuk simpan
+              Scan dengan HP untuk simpan hasil
             </p>
           </div>
         )}
@@ -110,12 +132,19 @@ export default function ResultDisplay({ resultData, onRestart }) {
           </button>
         </div>
 
-        {/* Countdown */}
-        <div className="mt-6 bg-white/20 backdrop-blur rounded-full px-6 py-3 text-center">
-          <p className="text-white font-semibold">
-            Auto restart dalam <span className="text-2xl font-bold">{countdown}</span>s
-          </p>
-        </div>
+        {/* Idle Warning Banner - hanya muncul 10 detik terakhir */}
+        {showWarning && (
+          <div className="fixed bottom-4 left-4 right-4 z-50 animate-pulse">
+            <div className="bg-red-500 text-white rounded-2xl px-6 py-4 shadow-2xl text-center max-w-md mx-auto">
+              <p className="font-bold text-lg">
+                ⏰ Restart otomatis dalam <span className="text-2xl">{countdown}</span> detik
+              </p>
+              <p className="text-sm opacity-90 mt-1">
+                Sentuh layar untuk melanjutkan
+              </p>
+            </div>
+          </div>
+        )}
 
         {/* Disclaimer */}
         <p className="text-center text-white/60 text-xs mt-6 px-4">
