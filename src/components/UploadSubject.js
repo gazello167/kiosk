@@ -40,7 +40,7 @@ export default function UploadSubject({ onNext }) {
   const videoConstraints = {
     width: 1080,
     height: 1920,
-    facingMode: 'user',
+    facingMode: 'environment',
   };
 
   return (
@@ -135,7 +135,7 @@ export default function UploadSubject({ onNext }) {
                 screenshotFormat="image/jpeg"
                 videoConstraints={videoConstraints}
                 className="w-full h-full object-cover"
-                mirrored
+                // mirrored
                 onUserMedia={() => setIsCameraReady(true)}
                 onUserMediaError={() => alert('Tidak dapat mengakses kamera')}
               />
