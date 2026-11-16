@@ -1,15 +1,13 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import { motion } from 'framer-motion';
 
 export default function ResultDisplay({ resultData, onRestart }) {
   const [countdown, setCountdown] = useState(60);
 
-  // ✅ Debug: log props yang diterima
   useEffect(() => {
-    console.log('ResultDisplay received resultData:', resultData);
-  }, [resultData]);
+    console.log('ResultDisplay mounted, resultData:', resultData);
+  }, []);
 
   useEffect(() => {
     const timer = setInterval(() => {
@@ -24,102 +22,131 @@ export default function ResultDisplay({ resultData, onRestart }) {
     return () => clearInterval(timer);
   }, [onRestart]);
 
-  // ✅ Guard: tampilkan error info kalau resultData undefined
   if (!resultData) {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-red-50">
-        <div className="bg-white p-8 rounded-2xl shadow-xl text-center">
-          <h2 className="text-2xl font-bold text-red-600 mb-4">
-            ❌ No Result Data
-          </h2>
-          <p className="text-gray-600 mb-6">
-            resultData is undefined or null
-          </p>
-          <button
-            onClick={onRestart}
-            className="bg-purple-600 text-white px-8 py-3 rounded-xl font-bold"
-          >
-            Start Over
-          </button>
-        </div>
+      <div style={{padding: '40px', textAlign: 'center', color: 'red'}}>
+        <h2>Error: No result data received</h2>
+        <button onClick={onRestart}>Start Over</button>
       </div>
     );
   }
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-purple-500 to-pink-500 p-8">
-      <div className="max-w-2xl mx-auto">
-        
-        {/* Header */}
-        <div className="text-center mb-8">
-          <h1 className="text-4xl font-bold text-white mb-2">
-            ✨ Virtual Try-On Result
-          </h1>
-          <p className="text-white/80">
-            {resultData.generationTime} | {resultData.sessionId}
-          </p>
-        </div>
-
-        {/* Result Image */}
-        <div className="bg-white rounded-3xl p-6 mb-6 shadow-2xl">
-          {resultData.imageUrl ? (
-            <img
-              src={resultData.imageUrl}
-              alt="Result"
-              className="w-full rounded-2xl object-cover"
-              onError={(e) => {
-                console.error('Image load error:', e);
-                e.target.src = 'https://picsum.photos/400/600';
-              }}
-            />
-          ) : (
-            <div className="bg-gray-100 rounded-2xl h-96 flex items-center justify-center">
-              <p className="text-gray-500">No image URL</p>
-            </div>
-          )}
-        </div>
-
-        {/* QR Code */}
-        {resultData.qrCode && (
-          <div className="bg-white rounded-3xl p-6 mb-6 shadow-2xl text-center">
-            <h2 className="text-xl font-bold text-gray-800 mb-4">
-              📱 Scan QR Code
-            </h2>
-            <img
-              src={resultData.qrCode}
-              alt="QR"
-              className="w-48 h-48 mx-auto"
-            />
-          </div>
-        )}
-
-        {/* Debug Info */}
-        <div className="bg-black/20 rounded-2xl p-4 mb-6">
-          <p className="text-white text-sm font-mono">
-            Session: {resultData.sessionId}<br/>
-            Model: {resultData.metadata?.ai_model}<br/>
-            DB Saved: {String(resultData.dbSaved)}<br/>
-            Time: {resultData.generationTime}
-          </p>
-        </div>
-
-        {/* Actions */}
-        <div className="flex gap-4 mb-6">
-          <button
-            onClick={onRestart}
-            className="flex-1 bg-white text-purple-600 py-4 rounded-2xl font-bold text-lg hover:bg-gray-100 transition-all"
-          >
-            🔄 Coba Lagi
-          </button>
-        </div>
-
-        {/* Countdown */}
-        <div className="text-center">
-          <p className="text-white text-lg">
-            Auto restart dalam <strong>{countdown}</strong> detik
-          </p>
-        </div>
+    <div style={{
+      minHeight: '100vh',
+      background: 'linear-gradient(to bottom right, #7c3aed, #ec4899)',
+      padding: '32px',
+      display: 'flex',
+      flexDirection: 'column',
+      alignItems: 'center'
+    }}>
+      {/* Header */}
+      <div style={{textAlign: 'center', marginBottom: '32px'}}>
+        <h1 style={{
+          fontSize: '2.5rem',
+          fontWeight: 'bold',
+          color: 'white',
+          marginBottom: '8px'
+        }}>
+          ✨ Virtual Try-On Berhasil!
+        </h1>
+        <p style={{color: 'rgba(255,255,255,0.8)', fontSize: '1.1rem'}}>
+          Generated in {resultData.generationTime}
+        </p>
       </div>
+
+      {/* Result Image */}
+      <div style={{
+        background: 'white',
+        borderRadius: '24px',
+        padding: '24px',
+        marginBottom: '24px',
+        maxWidth: '500px',
+        width: '100%',
+        boxShadow: '0 25px 50px rgba(0,0,0,0.3)'
+      }}>
+        <img
+          src={resultData.imageUrl}
+          alt="Virtual Try-On Result"
+          style={{
+            width: '100%',
+            borderRadius: '16px',
+            display: 'block'
+          }}
+          onLoad={() => console.log('Image loaded successfully')}
+          onError={(e) => {
+            console.error('Image failed to load:', resultData.imageUrl);
+            e.target.src = 'https://picsum.photos/400/600';
+          }}
+        />
+      </div>
+
+      {/* QR Code */}
+      {resultData.qrCode && (
+        <div style={{
+          background: 'white',
+          borderRadius: '24px',
+          padding: '32px',
+          marginBottom: '24px',
+          textAlign: 'center',
+          maxWidth: '500px',
+          width: '100%'
+        }}>
+          <h2 style={{
+            fontSize: '1.3rem',
+            fontWeight: 'bold',
+            marginBottom: '16px',
+            color: '#1f2937'
+          }}>
+            📱 Scan untuk Simpan
+          </h2>
+          <img
+            src={resultData.qrCode}
+            alt="QR Code"
+            style={{width: '200px', height: '200px', margin: '0 auto', display: 'block'}}
+          />
+        </div>
+      )}
+
+      {/* Debug Info */}
+      <div style={{
+        background: 'rgba(0,0,0,0.3)',
+        borderRadius: '16px',
+        padding: '16px',
+        marginBottom: '24px',
+        maxWidth: '500px',
+        width: '100%'
+      }}>
+        <p style={{color: 'white', fontSize: '0.85rem', fontFamily: 'monospace', margin: 0}}>
+          Session: {resultData.sessionId}<br/>
+          AI: {resultData.metadata && resultData.metadata.ai_model}<br/>
+          DB: {String(resultData.dbSaved)}
+        </p>
+      </div>
+
+      {/* Buttons */}
+      <div style={{display: 'flex', gap: '16px', marginBottom: '24px'}}>
+        <button
+          onClick={onRestart}
+          style={{
+            background: 'white',
+            color: '#7c3aed',
+            padding: '16px 32px',
+            borderRadius: '999px',
+            fontWeight: 'bold',
+            fontSize: '1.1rem',
+            border: 'none',
+            cursor: 'pointer'
+          }}
+        >
+          🔄 Coba Lagi
+        </button>
+      </div>
+
+      {/* Countdown */}
+      <p style={{color: 'rgba(255,255,255,0.8)', fontSize: '1.1rem'}}>
+        Auto restart dalam <strong style={{color: 'white', fontSize: '1.4rem'}}>{countdown}</strong> detik
+      </p>
     </div>
   );
 }
