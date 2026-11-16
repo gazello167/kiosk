@@ -1,17 +1,24 @@
 import './globals.css';
 
 export const metadata = {
-  title: 'Virtual Try-On Kiosk - Toko Kain',
-  description: 'Coba kain favorit Anda dengan AI',
+  title: 'Allamoda - Virtual Try-On',
+  description: 'Coba pakaian secara virtual dengan AI',
+};
+
+// ✅ Viewport config untuk mobile (Next.js 14+)
+export const viewport = {
+  width: 'device-width',
+  initialScale: 1,
+  maximumScale: 1,
+  userScalable: false,
+  viewportFit: 'cover', // Penting untuk iPhone dengan notch
 };
 
 export default function RootLayout({ children }) {
   return (
     <html lang="id">
-      <body className="kiosk-mode" style={{ fontFamily: 'system-ui, -apple-system, sans-serif' }}>
-        <div className="fixed inset-0 w-screen h-screen overflow-hidden">
-          {children}
-        </div>
+      <body>
+        {children}
       </body>
     </html>
   );
